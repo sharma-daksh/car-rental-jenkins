@@ -5,3 +5,5 @@ target/
 .vscode/
 *.iml
 .env
+
+data/
