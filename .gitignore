@@ -7,3 +7,6 @@ target/
 .env
 
 data/
+node_modules/
+frontend/dist/
+selenium/target/
