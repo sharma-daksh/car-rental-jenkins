@@ -2,6 +2,7 @@ pipeline {
     agent any
 
     options {
+        skipDefaultCheckout(true)
         timestamps()
         disableConcurrentBuilds()
     }
@@ -10,6 +11,12 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+            }
+        }
+
+        stage('Build Frontend') {
+            steps {
+                bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\build-frontend.ps1'
             }
         }
 
@@ -42,15 +49,28 @@ pipeline {
                 bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\health-check.ps1'
             }
         }
+
+        stage('Selenium UI Tests') {
+            steps {
+                bat 'mvnw.cmd -B -f selenium\\pom.xml test "-Dapp.baseUrl=http://127.0.0.1:8081"'
+            }
+        }
     }
 
     post {
+        always {
+            junit testResults: 'selenium/target/surefire-reports/TEST-*.xml',
+                  allowEmptyResults: true
+        }
+
         success {
             archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-            echo 'Build, tests, packaging, deployment and HTTP availability check completed.'
+            echo 'Frontend build, backend tests, deployment and Selenium tests completed successfully.'
         }
+
         failure {
-            echo 'Pipeline failed. Review the failed stage and Console Output.'
+            echo 'Pipeline failed. Check Console Output and the Selenium test report.'
         }
     }
 }
+
