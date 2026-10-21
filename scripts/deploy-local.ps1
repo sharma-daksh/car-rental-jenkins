@@ -50,6 +50,8 @@ Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
 
 $java = (Get-Command java.exe -ErrorAction Stop).Source
 $arguments = @('-jar', "`"$targetJar`"", '--spring.profiles.active=demo')
+# Allow the deployed process to survive Jenkins build cleanup.
+$env:JENKINS_NODE_COOKIE = 'dontKillMe'
 
 $app = Start-Process -FilePath $java `
     -ArgumentList $arguments `
