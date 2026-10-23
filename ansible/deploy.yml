@@ -1,0 +1,221 @@
+---
+- name: Provision, deploy and validate Car Rental
+  hosts: car_rental_nodes
+  connection: local
+  become: true
+  gather_facts: false
+
+  vars:
+    project_dir: /mnt/c/Users/Daksh/Desktop/car-rental-jenkins
+    image_repo: car-rental-ansible
+    image_tag: "1.0.0"
+    rollback_image_tag: "1.0.0"
+    candidate_image: "{{ image_repo }}:{{ image_tag }}"
+    container_name: car-rental-ansible
+    volume_name: car-rental-ansible-data
+    host_port: "8084"
+    container_port: "8081"
+    force_failure_test: false
+    health_url: "http://127.0.0.1:8084/"
+    docker_format_image: "{{ '{{' }}.Config.Image{{ '}}' }}"
+    docker_format_running: "{{ '{{' }}.State.Running{{ '}}' }}"
+
+  tasks:
+    - name: Check whether the candidate image exists
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ candidate_image }}"]
+      register: candidate_probe
+      changed_when: false
+      failed_when: false
+
+    - name: Build candidate image when missing
+      ansible.builtin.command:
+        argv: [docker, build, -t, "{{ candidate_image }}", "."]
+        chdir: "{{ project_dir }}"
+      when: candidate_probe.rc != 0
+      changed_when: true
+
+    - name: Check whether persistent database volume exists
+      ansible.builtin.command:
+        argv: [docker, volume, inspect, "{{ volume_name }}"]
+      register: volume_probe
+      changed_when: false
+      failed_when: false
+
+    - name: Create persistent database volume when missing
+      ansible.builtin.command:
+        argv: [docker, volume, create, "{{ volume_name }}"]
+      when: volume_probe.rc != 0
+      changed_when: true
+
+    - name: Find the currently deployed image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{{ docker_format_image }}"
+          - "{{ container_name }}"
+      register: current_image
+      changed_when: false
+      failed_when: false
+
+    - name: Check current container running state
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{{ docker_format_running }}"
+          - "{{ container_name }}"
+      register: current_running
+      changed_when: false
+      failed_when: false
+      when: current_image.rc == 0
+
+    - name: Select previous release for rollback
+      ansible.builtin.set_fact:
+        rollback_image: >-
+          {{ current_image.stdout if current_image.rc == 0
+             else image_repo ~ ':' ~ rollback_image_tag }}
+
+    - name: Verify rollback image exists locally
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ rollback_image }}"]
+      changed_when: false
+
+    - name: Deploy and validate candidate release
+      block:
+        - name: Remove old managed container when changing releases
+          ansible.builtin.command:
+            argv: [docker, rm, -f, "{{ container_name }}"]
+          when:
+            - current_image.rc == 0
+            - current_image.stdout != candidate_image
+          changed_when: true
+
+        - name: Start existing container when stopped and unchanged
+          ansible.builtin.command:
+            argv: [docker, start, "{{ container_name }}"]
+          when:
+            - current_image.rc == 0
+            - current_image.stdout == candidate_image
+            - current_running.stdout | default('false') | lower != 'true'
+          changed_when: true
+
+        - name: Start candidate container when missing or changing release
+          ansible.builtin.command:
+            argv:
+              - docker
+              - run
+              - -d
+              - --name
+              - "{{ container_name }}"
+              - --restart
+              - unless-stopped
+              - -p
+              - "127.0.0.1:{{ host_port }}:{{ container_port }}"
+              - -v
+              - "{{ volume_name }}:/app/data"
+              - "{{ candidate_image }}"
+          when: >-
+            current_image.rc != 0 or
+            current_image.stdout != candidate_image
+          changed_when: true
+
+        - name: Inject a controlled failure for rollback testing
+          ansible.builtin.fail:
+            msg: "Intentional test failure: validate automatic rollback."
+          when: force_failure_test | bool
+
+        - name: Wait for candidate HTTP health response
+          ansible.builtin.uri:
+            url: "{{ health_url }}"
+            method: GET
+            status_code: [200, 301, 302, 303, 307, 308, 401, 403]
+          register: candidate_health
+          until: >-
+            candidate_health.status is defined and
+            candidate_health.status in [200, 301, 302, 303, 307, 308, 401, 403]
+          retries: 30
+          delay: 2
+
+      rescue:
+        - name: Report candidate failure and initiate rollback
+          ansible.builtin.debug:
+            msg: >-
+              Candidate deployment or health validation failed.
+              Restoring previous image {{ rollback_image }}.
+
+        - name: Remove failed candidate container
+          ansible.builtin.command:
+            argv: [docker, rm, -f, "{{ container_name }}"]
+          changed_when: true
+          failed_when: false
+
+        - name: Restore previous stable container
+          ansible.builtin.command:
+            argv:
+              - docker
+              - run
+              - -d
+              - --name
+              - "{{ container_name }}"
+              - --restart
+              - unless-stopped
+              - -p
+              - "127.0.0.1:{{ host_port }}:{{ container_port }}"
+              - -v
+              - "{{ volume_name }}:/app/data"
+              - "{{ rollback_image }}"
+          changed_when: true
+
+        - name: Verify restored release health
+          ansible.builtin.uri:
+            url: "{{ health_url }}"
+            method: GET
+            status_code: [200, 301, 302, 303, 307, 308, 401, 403]
+          register: rollback_health
+          until: >-
+            rollback_health.status is defined and
+            rollback_health.status in [200, 301, 302, 303, 307, 308, 401, 403]
+          retries: 30
+          delay: 2
+
+        - name: Confirm recovery
+          ansible.builtin.debug:
+            msg: >-
+              Recovery succeeded. Previous image {{ rollback_image }}
+              is running and responding to HTTP requests.
+
+    - name: Determine expected final image
+      ansible.builtin.set_fact:
+        expected_final_image: >-
+          {{ rollback_image if (force_failure_test | bool)
+             else candidate_image }}
+
+    - name: Verify final container image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{{ docker_format_image }}"
+          - "{{ container_name }}"
+      register: deployed_image
+      changed_when: false
+
+    - name: Assert deployment or recovery succeeded
+      ansible.builtin.assert:
+        that:
+          - deployed_image.stdout == expected_final_image
+        success_msg: "Correct release is running: {{ deployed_image.stdout }}"
+        fail_msg: "Expected {{ expected_final_image }} but found {{ deployed_image.stdout }}"
+
+    - name: Display final deployment details
+      ansible.builtin.debug:
+        msg:
+          - "Container: {{ container_name }}"
+          - "Image: {{ deployed_image.stdout }}"
+          - "Application port: {{ host_port }}"
+          - "Health check: {{ health_url }}"
