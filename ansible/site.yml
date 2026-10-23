@@ -1,0 +1,103 @@
+---
+- name: Configure the Car Rental deployment node
+  hosts: car_rental_nodes
+  become: true
+  gather_facts: true
+
+  vars:
+    app_user: car-rental
+    app_group: car-rental
+    app_root: /opt/car-rental-jenkins
+    config_dir: /etc/car-rental-jenkins
+    log_dir: /var/log/car-rental-jenkins
+
+  tasks:
+    - name: Verify the target operating system
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+        fail_msg: "This playbook expects Ubuntu."
+
+    - name: Install required system packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create application group
+      ansible.builtin.group:
+        name: "{{ app_group }}"
+        system: true
+        state: present
+
+    - name: Create application service user
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        group: "{{ app_group }}"
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+        state: present
+
+    - name: Create application directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ app_root }}"
+          owner: "{{ app_user }}"
+          group: "{{ app_group }}"
+          mode: "0750"
+        - path: "{{ config_dir }}"
+          owner: root
+          group: "{{ app_group }}"
+          mode: "0750"
+        - path: "{{ log_dir }}"
+          owner: "{{ app_user }}"
+          group: "{{ app_group }}"
+          mode: "0750"
+
+    - name: Create application configuration
+      ansible.builtin.copy:
+        dest: "{{ config_dir }}/app.env"
+        owner: root
+        group: "{{ app_group }}"
+        mode: "0640"
+        content: |
+          APP_NAME=car-rental-jenkins
+          CONTAINER_NAME=car-rental-ansible
+          IMAGE_NAME=car-rental-jenkins
+          IMAGE_TAG=1.0.0
+          HOST_PORT=8084
+          CONTAINER_PORT=8081
+          HEALTH_CHECK_URL=http://127.0.0.1:8084/
+
+    - name: Check Docker engine availability
+      ansible.builtin.command:
+        argv:
+          - docker
+          - info
+      changed_when: false
+      register: docker_info
+
+    - name: Confirm Docker is available
+      ansible.builtin.assert:
+        that:
+          - docker_info.rc == 0
+        success_msg: "Docker is available on the target node."
+        fail_msg: "Docker is not available. Check Docker permissions."
+
+    - name: Report configuration completion
+      ansible.builtin.debug:
+        msg:
+          - "Target OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Application directory: {{ app_root }}"
+          - "Configuration directory: {{ config_dir }}"
+          - "Log directory: {{ log_dir }}"
+          - "Planned application port: 8084"
