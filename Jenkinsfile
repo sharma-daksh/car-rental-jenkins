@@ -7,6 +7,10 @@ pipeline {
         disableConcurrentBuilds()
     }
 
+    triggers {
+        pollSCM('H/5 * * * *')
+    }
+
     stages {
         stage('Checkout') {
             steps {
@@ -55,6 +59,39 @@ pipeline {
                 bat 'mvnw.cmd -B -f selenium\\pom.xml test "-Dapp.baseUrl=http://127.0.0.1:8081"'
             }
         }
+
+        stage('Docker Build and Publish') {
+            steps {
+                bat '''
+                    docker version
+                    if errorlevel 1 exit /b 1
+
+                    docker build -t localhost:5000/car-rental-jenkins:%BUILD_NUMBER% .
+                    if errorlevel 1 exit /b 1
+
+                    docker tag localhost:5000/car-rental-jenkins:%BUILD_NUMBER% localhost:5000/car-rental-jenkins:latest
+                    if errorlevel 1 exit /b 1
+
+                    docker push localhost:5000/car-rental-jenkins:%BUILD_NUMBER%
+                    if errorlevel 1 exit /b 1
+
+                    docker push localhost:5000/car-rental-jenkins:latest
+                    if errorlevel 1 exit /b 1
+                '''
+            }
+        }
+
+        stage('Deploy Docker Container') {
+            steps {
+                bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\deploy-docker.ps1 -ImageTag %BUILD_NUMBER%'
+            }
+        }
+
+        stage('Docker Health Check') {
+            steps {
+                bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\docker-health-check.ps1'
+            }
+        }
     }
 
     post {
@@ -65,12 +102,11 @@ pipeline {
 
         success {
             archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-            echo 'Frontend build, backend tests, deployment and Selenium tests completed successfully.'
+            echo 'Build, unit tests, local deployment, Selenium tests and Docker deployment completed successfully.'
         }
 
         failure {
-            echo 'Pipeline failed. Check Console Output and the Selenium test report.'
+            echo 'Pipeline failed. Check Console Output and the failed stage before proceeding.'
         }
     }
 }
-
