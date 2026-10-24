@@ -16,18 +16,24 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.Map;
 
 @Service
 @Transactional
 public class RentalService {
     private static final Set<String> OPEN_STATUSES = Set.of("RESERVED", "BOOKED", "ACTIVE");
     private static final Set<String> VALID_STATUSES = Set.of("RESERVED", "ACTIVE", "COMPLETED", "CANCELLED");
-
+    private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
+            "RESERVED", Set.of("ACTIVE", "CANCELLED"),
+            "ACTIVE", Set.of("COMPLETED"),
+            "COMPLETED", Set.of(),
+            "CANCELLED", Set.of());
     private final RentalRepository rentalRepository;
     private final CustomerRepository customerRepository;
     private final CarRepository carRepository;
 
-    public RentalService(RentalRepository rentalRepository, CustomerRepository customerRepository, CarRepository carRepository) {
+    public RentalService(RentalRepository rentalRepository, CustomerRepository customerRepository,
+            CarRepository carRepository) {
         this.rentalRepository = rentalRepository;
         this.customerRepository = customerRepository;
         this.carRepository = carRepository;
@@ -52,10 +58,12 @@ public class RentalService {
                 .orElseThrow(() -> new java.util.NoSuchElementException("Vehicle not found: " + request.carId()));
 
         if (car.getStatus() == null || !"AVAILABLE".equalsIgnoreCase(car.getStatus())) {
-            throw new IllegalStateException("This vehicle is not available. Refresh the inventory and choose an available vehicle.");
+            throw new IllegalStateException(
+                    "This vehicle is not available. Refresh the inventory and choose an available vehicle.");
         }
         if (rentalRepository.existsByCar_IdAndStatusIn(car.getId(), OPEN_STATUSES)) {
-            throw new IllegalStateException("This vehicle already has an open rental. Refresh the inventory and choose another vehicle.");
+            throw new IllegalStateException(
+                    "This vehicle already has an open rental. Refresh the inventory and choose another vehicle.");
         }
         if (car.getRentalPrice() == null || car.getRentalPrice() < 0) {
             throw new IllegalStateException("The selected vehicle does not have a valid daily rental rate.");
@@ -85,10 +93,26 @@ public class RentalService {
         }
         Rental rental = rentalRepository.findById(id)
                 .orElseThrow(() -> new java.util.NoSuchElementException("Rental not found: " + id));
-        Car car = carRepository.findById(rental.getCar().getId())
-                .orElseThrow(() -> new java.util.NoSuchElementException("Vehicle not found for this rental."));
 
-        if (nextStatus.equals(rental.getStatus())) return RentalResponse.from(rental);
+        String currentStatus = rental.getStatus() == null
+                ? ""
+                : rental.getStatus().trim().toUpperCase(Locale.ROOT);
+
+        if (nextStatus.equals(currentStatus)) {
+            return RentalResponse.from(rental);
+        }
+
+        if (!ALLOWED_TRANSITIONS
+                .getOrDefault(currentStatus, Set.of())
+                .contains(nextStatus)) {
+            throw new IllegalStateException(
+                    "Invalid rental status transition from "
+                            + currentStatus + " to " + nextStatus + ".");
+        }
+
+        Car car = carRepository.findById(rental.getCar().getId())
+                .orElseThrow(() -> new java.util.NoSuchElementException(
+                        "Vehicle not found for this rental."));
         boolean targetOpen = OPEN_STATUSES.contains(nextStatus);
         boolean vehicleInUseByAnotherRental = rentalRepository.existsByCar_IdAndIdNotAndStatusIn(
                 car.getId(), rental.getId(), OPEN_STATUSES);
