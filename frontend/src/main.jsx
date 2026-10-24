@@ -4,8 +4,8 @@ import {
   Activity, AlertCircle, ArrowDownRight, ArrowRight, ArrowUpRight,
   Bell, CarFront, Check, ChevronDown, CircleHelp, Clock3, Gauge,
   LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal,
-  Plus, Search, Settings2, ShieldCheck, SlidersHorizontal,
-  TrendingUp, Users, Wallet, Wrench, X, CalendarDays, Fuel,
+  Plus, Search, ShieldCheck, SlidersHorizontal,
+  Users, Wallet, Wrench, X, CalendarDays, Fuel, Moon, Sun,
   Pencil, Trash2, RefreshCw, CircleCheck, CircleX, KeyRound, Mail, Phone,
 } from 'lucide-react';
 import './styles.css';
@@ -82,8 +82,25 @@ function currency(value) {
   }).format(Number(value) || 0);
 }
 
+function vehicleImage(car, index = 0) {
+  const identity = `${car?.brand || ''} ${car?.model || ''}`.toLowerCase();
+  const fuel = String(car?.fuelType || '').toLowerCase();
+  if (fuel.includes('electric') || /\b(ev|atto|zs ev)\b/.test(identity)) return '/images/car-electric.jpg';
+  if (/\b(city|verna|slavia|virtus|sedan|camry|accord)\b/.test(identity)) return '/images/car-sedan.jpg';
+  if (/\b(creta|xuv|fortuner|crysta|nexon|punch|thar|safari|harrier|scorpio|ertiga|carens|hyryder|elevate|kiger|sonet|suv)\b/.test(identity)) return '/images/car-suv.jpg';
+  const fallbackImages = ['/images/car-hatchback.jpg', '/images/car-sedan.jpg', '/images/car-suv.jpg', '/images/car-electric.jpg'];
+  const stableHash = Array.from(identity).reduce((hash, character) => (hash * 31 + character.charCodeAt(0)) >>> 0, 7);
+  return fallbackImages[stableHash % fallbackImages.length];
+}
+
+const OPEN_RENTAL_STATUSES = new Set(['RESERVED', 'BOOKED', 'ACTIVE']);
+
 function App() {
-  const [activePage, setActivePage] = useState('Overview');
+  const [activePage, setActivePage] = useState('Home');
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('rove-theme') === 'dark' ? 'dark' : 'light'; }
+    catch { return 'light'; }
+  });
   const [cars, setCars] = useState([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState('');
@@ -109,6 +126,11 @@ function App() {
   const [rentalForm, setRentalForm] = useState(EMPTY_RENTAL_FORM);
   const [rentalSaving, setRentalSaving] = useState(false);
   const [rentalStatusSaving, setRentalStatusSaving] = useState(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('rove-theme', theme); } catch { /* Theme still works for this session. */ }
+  }, [theme]);
 
   const loadCars = useCallback(async () => {
     setLoading(true);
@@ -179,6 +201,8 @@ function App() {
       return matchesQuery && matchesStatus;
     });
   }, [cars, query, statusFilter]);
+
+  const featuredCars = useMemo(() => cars.slice(0, 4), [cars]);
 
   function openCreate() {
     setEditingCar(null);
@@ -292,6 +316,38 @@ function App() {
 
   async function createRental(event) {
     event.preventDefault();
+    const today = localDate();
+    if (!rentalForm.customerId || !rentalForm.carId) {
+      setToast('Choose a customer and an available vehicle first.');
+      return;
+    }
+    if (!rentalForm.startDate || !rentalForm.endDate) {
+      setToast('Choose both a start date and an end date.');
+      return;
+    }
+    if (rentalForm.startDate < today) {
+      setToast('The rental start date cannot be in the past.');
+      return;
+    }
+    if (rentalForm.endDate < rentalForm.startDate) {
+      setToast('The return date must be on or after the start date.');
+      return;
+    }
+    const selectedCar = cars.find((car) => String(car.id) === String(rentalForm.carId));
+    if (!selectedCar || String(selectedCar.status || '').toUpperCase() !== 'AVAILABLE') {
+      setToast('That vehicle is no longer available. Refresh the inventory and choose another vehicle.');
+      await loadCars();
+      return;
+    }
+    const existingOpenRental = rentals.find((rental) =>
+      String(rental.carId ?? rental.vehicleId) === String(selectedCar.id)
+      && OPEN_RENTAL_STATUSES.has(String(rental.status || '').toUpperCase())
+    );
+    if (existingOpenRental) {
+      setToast('This vehicle already has an open rental. Choose another vehicle.');
+      await Promise.all([loadRentals(), loadCars()]);
+      return;
+    }
     setRentalSaving(true);
     try {
       const payload = {
@@ -334,7 +390,13 @@ function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell theme-${theme}`}>
+      <div className="starfield" aria-hidden="true">
+        <span className="star star-a" /><span className="star star-b" /><span className="star star-c" />
+        <span className="star star-d" /><span className="star star-e" /><span className="star star-f" />
+        <span className="star star-g" /><span className="star star-h" /><span className="star star-i" />
+        <span className="shooting-star shooting-a" /><span className="shooting-star shooting-b" />
+      </div>
       {mobileNavOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
       <aside className={`sidebar ${mobileNavOpen ? 'sidebar-open' : ''}`}>
         <div className="brand-lockup">
@@ -349,15 +411,10 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav className="main-nav" aria-label="Main navigation">
-          <button className={`nav-item ${activePage === 'Overview' ? 'active' : ''}`} onClick={() => goTo('Overview')}><LayoutDashboard size={18} /><span>Overview</span></button>
+          <button className={`nav-item ${activePage === 'Home' ? 'active' : ''}`} onClick={() => goTo('Home')}><LayoutDashboard size={18} /><span>Home</span></button>
           <button className={`nav-item ${activePage === 'Vehicles' ? 'active' : ''}`} onClick={() => goTo('Vehicles')}><CarFront size={18} /><span>Vehicles</span><span className="nav-count">{cars.length}</span></button>
           <button className={`nav-item ${activePage === 'Rentals' ? 'active' : ''}`} onClick={() => goTo('Rentals')}><CalendarDays size={18} /><span>Rentals</span><span className="nav-count">{rentals.length}</span></button>
           <button className={`nav-item ${activePage === 'Customers' ? 'active' : ''}`} onClick={() => goTo('Customers')}><Users size={18} /><span>Customers</span><span className="nav-count">{customers.length}</span></button>
-        </nav>
-        <div className="nav-label nav-label-spaced">MANAGE</div>
-        <nav className="main-nav">
-          <button className={`nav-item ${activePage === 'Reports' ? 'active' : ''}`} onClick={() => goTo('Reports')}><TrendingUp size={18} /><span>Reports</span></button>
-          <button className={`nav-item ${activePage === 'Settings' ? 'active' : ''}`} onClick={() => goTo('Settings')}><Settings2 size={18} /><span>Settings</span></button>
         </nav>
         <div className="sidebar-bottom">
           <div className="help-card"><div className="help-icon"><CircleHelp size={17} /></div><strong>Need a hand?</strong><p>Find your way around Rove.</p><button onClick={() => setToast('Help centre will be added in a future iteration.')}>Visit help centre <ArrowRight size={14} /></button></div>
@@ -371,15 +428,50 @@ function App() {
           <div className="breadcrumb"><span>Workspace</span><span className="crumb-separator">/</span><strong>{activePage}</strong></div>
           <div className="topbar-actions">
             <div className="global-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${activePage.toLowerCase()}...`} aria-label={`Search ${activePage.toLowerCase()}`} /><kbd>⌘ K</kbd></div>
+            <button className="icon-button theme-toggle" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
             <button className="icon-button notification-button" aria-label="Notifications" onClick={() => setToast('You are all caught up.')}><Bell size={18} /><span /></button>
             <div className="topbar-divider" />
             <div className="topbar-user"><div className="topbar-avatar">DS</div><ChevronDown size={14} className="muted-icon" /></div>
           </div>
         </header>
 
-        {activePage === 'Overview' && (
-          <div className="page-content">
-            <div className="page-heading heading-with-actions"><div><div className="eyebrow"><span className="eyebrow-dot" /> FLEET OVERVIEW</div><h1>Your fleet, at a glance.</h1><p className="page-subtitle">Here's what's happening with your vehicles today.</p></div><div className="heading-actions"><button className="button button-secondary" onClick={loadCars} disabled={loading}><RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh</button><button className="button button-primary" onClick={openCreate}><Plus size={17} /> Add vehicle</button></div></div>
+        {activePage === 'Home' && (
+          <div className="page-content home-content">
+            <section className="landing-hero">
+              <div className="landing-hero-copy">
+                <div className="hero-kicker"><span className="hero-live-dot" /> ROVE RENTALS <span className="hero-kicker-divider" /> DRIVE SMARTER</div>
+                <h1>Drive your <span>next adventure.</span></h1>
+                <p>Find the right ride, book in a few clicks, and keep every journey moving. Your fleet, your customers, your rentals — all in one workspace.</p>
+                <div className="landing-hero-actions">
+                  <button className="button button-primary hero-primary" onClick={() => goTo('Vehicles')}>Explore the fleet <ArrowRight size={17} /></button>
+                  <button className="button button-glass" onClick={openCreateRental} disabled={!customers.length || !cars.some((car) => String(car.status || '').toUpperCase() === 'AVAILABLE')}>Create a rental <CalendarDays size={16} /></button>
+                </div>
+                <div className="hero-micro-stats">
+                  <div><strong>{loading ? '—' : counts.available}</strong><span>vehicles ready</span></div>
+                  <div className="hero-stat-separator" />
+                  <div><strong>{customersLoading ? '—' : customers.length}</strong><span>customers</span></div>
+                  <div className="hero-stat-separator" />
+                  <div><strong>{rentalsLoading ? '—' : rentals.length}</strong><span>rental records</span></div>
+                </div>
+              </div>
+              <div className="landing-hero-visual">
+                <div className="hero-image-halo" />
+                <img src="/images/rove-hero.jpg" alt="Illustrative premium car in a neon night setting" />
+                <div className="hero-image-caption"><span className="hero-image-caption-dot" /><div><strong>Every ride starts here</strong><span>Rove Fleet Workspace</span></div><ArrowUpRight size={18} /></div>
+                <div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" />
+              </div>
+              <div className="hero-bottom-glow" />
+            </section>
+
+            <section className="featured-fleet-section">
+              <div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-dot" /> YOUR COLLECTION</div><h2>Find your kind of drive.</h2><p>Quick look at the vehicles in your fleet.</p></div><button className="link-button" onClick={() => goTo('Vehicles')}>View all vehicles <ArrowRight size={15} /></button></div>
+              {featuredCars.length ? <div className="featured-car-grid">{featuredCars.map((car, index) => <article className="featured-car-card" key={car.id}>
+                <div className="featured-car-image"><img src={vehicleImage(car, index)} alt={`Illustrative ${car.brand} ${car.model}`} loading="lazy" /><span className={`featured-car-status ${statusClass(car.status)}`}><span />{statusLabel(car.status)}</span><span className="featured-car-image-index">0{index + 1}</span></div>
+                <div className="featured-car-info"><div><span className="featured-car-meta">{car.fuelType || 'Flexible drive'} <span>·</span> Fleet vehicle</span><h3>{car.brand} {car.model}</h3><span className="featured-car-plate">{car.registrationNumber || `Vehicle #${car.id}`}</span></div><div className="featured-car-bottom"><strong>{currency(car.rentalPrice)}<span>/day</span></strong><button aria-label={`View ${car.brand} ${car.model} in vehicle inventory`} onClick={() => goTo('Vehicles')}><ArrowUpRight size={17} /></button></div></div>
+              </article>)}</div> : <div className="featured-empty"><CarFront size={24} /><strong>Your fleet starts here</strong><span>Add a vehicle to see your collection on the home page.</span><button className="button button-primary" onClick={openCreate}><Plus size={15} /> Add first vehicle</button></div>}
+            </section>
+
+            <div className="page-heading heading-with-actions home-dashboard-heading"><div><div className="eyebrow"><span className="eyebrow-dot" /> FLEET OVERVIEW</div><h2>Your fleet, at a glance.</h2><p className="page-subtitle">Live operations and availability, all in one place.</p></div><div className="heading-actions"><button className="button button-secondary" onClick={() => Promise.all([loadCars(), loadCustomers(), loadRentals()])} disabled={loading || customersLoading || rentalsLoading}><RefreshCw size={16} className={loading || customersLoading || rentalsLoading ? 'spin' : ''} /> Refresh</button><button className="button button-primary" onClick={openCreate}><Plus size={17} /> Add vehicle</button></div></div>
             {apiError && <ApiNotice message={apiError} onRetry={loadCars} />}
             <section className="stats-grid" aria-label="Fleet statistics">
               <StatCard icon={<CarFront size={19} />} iconClass="purple" label="Total vehicles" value={loading ? '—' : counts.total} note="In your fleet" trend={<span className="stat-neutral"><Activity size={13} /> Live inventory</span>} />
@@ -425,7 +517,6 @@ function App() {
           onRefresh={() => Promise.all([loadRentals(), loadCars(), loadCustomers()])}
           onCreate={openCreateRental} onStatusChange={updateRentalStatus} statusSaving={rentalStatusSaving}
         />}
-        {['Reports', 'Settings'].includes(activePage) && <ComingSoon page={activePage} onGoVehicles={() => goTo('Vehicles')} />}
         {customerModalOpen && <CustomerModal
           form={customerForm} setForm={setCustomerForm} editingCustomer={editingCustomer}
           saving={customerSaving} onClose={() => setCustomerModalOpen(false)} onSubmit={saveCustomer}
@@ -454,7 +545,7 @@ function LegendRow({ color, label, value }) {
 function VehicleTable({ cars, loading, onEdit, onDelete, onAdd }) {
   if (loading) return <div className="table-state"><LoaderCircle className="spin" size={22} /><span>Loading vehicle inventory...</span></div>;
   if (!cars.length) return <div className="empty-state"><div className="empty-icon"><CarFront size={25} /></div><h3>No vehicles to show</h3><p>Add a vehicle to start building your fleet inventory.</p><button className="button button-primary" onClick={onAdd}><Plus size={16} /> Add your first vehicle</button></div>;
-  return <div className="table-scroll"><table className="vehicle-table"><thead><tr><th>VEHICLE</th><th>REGISTRATION</th><th>FUEL TYPE</th><th>DAILY RATE</th><th>STATUS</th><th aria-label="Actions" /></tr></thead><tbody>{cars.map((car) => <tr key={car.id}><td><div className="vehicle-cell"><div className={`car-tile tile-${(car.fuelType || 'petrol').toLowerCase()}`}><CarFront size={20} /></div><div><strong>{car.brand} {car.model}</strong><span>Vehicle ID #{car.id}</span></div></div></td><td><span className="plate-number">{car.registrationNumber || '—'}</span></td><td><span className="fuel-type"><Fuel size={14} />{car.fuelType || 'Not set'}</span></td><td><strong className="rate-value">{currency(car.rentalPrice)}<span>/day</span></strong></td><td><span className={`status-badge ${statusClass(car.status)}`}><span />{statusLabel(car.status)}</span></td><td><div className="row-actions"><button className="table-action" title="Edit vehicle" aria-label={`Edit ${car.brand} ${car.model}`} onClick={() => onEdit(car)}><Pencil size={15} /></button><button className="table-action delete-action" title="Delete vehicle" aria-label={`Delete ${car.brand} ${car.model}`} onClick={() => onDelete(car)}><Trash2 size={15} /></button></div></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="vehicle-table"><thead><tr><th>VEHICLE</th><th>REGISTRATION</th><th>FUEL TYPE</th><th>DAILY RATE</th><th>STATUS</th><th aria-label="Actions" /></tr></thead><tbody>{cars.map((car) => <tr key={car.id}><td><div className="vehicle-cell"><img className="vehicle-thumb" src={vehicleImage(car, Number(car.id || 0))} alt={`Illustrative ${car.brand} ${car.model}`} loading="lazy" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = '/images/car-hatchback.jpg'; }} /><div><strong>{car.brand} {car.model}</strong><span>Vehicle ID #{car.id}</span></div></div></td><td><span className="plate-number">{car.registrationNumber || '—'}</span></td><td><span className="fuel-type"><Fuel size={14} />{car.fuelType || 'Not set'}</span></td><td><strong className="rate-value">{currency(car.rentalPrice)}<span>/day</span></strong></td><td><span className={`status-badge ${statusClass(car.status)}`}><span />{statusLabel(car.status)}</span></td><td><div className="row-actions"><button className="table-action" title="Edit vehicle" aria-label={`Edit ${car.brand} ${car.model}`} onClick={() => onEdit(car)}><Pencil size={15} /></button><button className="table-action delete-action" title="Delete vehicle" aria-label={`Delete ${car.brand} ${car.model}`} onClick={() => onDelete(car)}><Trash2 size={15} /></button></div></td></tr>)}</tbody></table></div>;
 }
 
 function ApiNotice({ message, onRetry }) {
@@ -504,7 +595,7 @@ function RentalsPage({ rentals, customers, cars, loading, error, query, onRefres
     <section className="stats-grid"><StatCard icon={<CalendarDays size={19} />} iconClass="purple" label="Total rentals" value={loading ? '—' : rentals.length} note="All rental records" trend={<span className="stat-neutral">Rental history</span>} /><StatCard icon={<Clock3 size={19} />} iconClass="amber" label="Open rentals" value={loading ? '—' : active} note="Reserved or currently out" trend={<span className="stat-neutral">Needs tracking</span>} /><StatCard icon={<CircleCheck size={19} />} iconClass="green" label="Completed" value={loading ? '—' : completed} note="Returned rentals" trend={<span className="stat-good">Closed records</span>} /><StatCard icon={<Wallet size={19} />} iconClass="blue" label="Tracked value" value={loading ? '—' : currency(revenue)} note="Active + completed rentals" trend={<span className="stat-neutral">Rental value</span>} /></section>
     <section className="panel full-inventory-panel"><div className="inventory-toolbar"><div className="inventory-total"><strong>Rental register</strong><span>{filtered.length} record{filtered.length === 1 ? '' : 's'}</span></div><span className="rental-availability"><CarFront size={15} /> {available} vehicle{available === 1 ? '' : 's'} available</span></div>
       {loading ? <div className="table-state"><LoaderCircle className="spin" size={22} /><span>Loading rentals...</span></div> : filtered.length === 0 ? <div className="empty-state"><div className="empty-icon"><CalendarDays size={25} /></div><h3>{rentals.length ? 'No matching rentals' : 'No rentals yet'}</h3><p>{rentals.length ? 'Try another search term.' : 'Create a rental to connect a customer with an available vehicle.'}</p>{canCreate && <button className="button button-primary" onClick={onCreate}><Plus size={16} /> Create first rental</button>}</div> :
-      <div className="table-scroll"><table className="vehicle-table feature-table rental-table"><thead><tr><th>RENTAL</th><th>CUSTOMER</th><th>VEHICLE</th><th>RENTAL PERIOD</th><th>TOTAL</th><th>STATUS</th></tr></thead><tbody>{filtered.map((rental) => <tr key={rental.id}><td><div className="rental-id">#{rental.id}</div><span className="rental-subtext">Rental record</span></td><td><strong>{rental.customerName || `Customer #${rental.customerId}`}</strong></td><td><strong>{rental.vehicleName || `Vehicle #${rental.carId}`}</strong><span className="rental-subtext">{rental.registrationNumber || ''}</span></td><td><div className="date-range">{rental.startDate} <span>→</span> {rental.endDate}</div><span className="rental-subtext">{Math.max(1, Math.round((new Date(`${rental.endDate}T00:00:00`) - new Date(`${rental.startDate}T00:00:00`)) / 86400000))} day(s)</span></td><td><strong className="rate-value">{currency(rental.totalPrice)}</strong><span className="rental-subtext">{currency(rental.dailyRate)}/day</span></td><td><div className="rental-status-cell"><span className={`status-badge ${rentalStatusClass(rental.status)}`}><span />{rentalStatusLabel(rental.status)}</span><select className="rental-status-select" aria-label={`Change status for rental ${rental.id}`} value={String(rental.status || 'RESERVED').toUpperCase()} disabled={statusSaving === rental.id} onChange={(event) => onStatusChange(rental, event.target.value)}><option value="RESERVED">Reserved</option><option value="ACTIVE">Active</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select></div></td></tr>)}</tbody></table></div>}
+      <div className="table-scroll"><table className="vehicle-table feature-table rental-table"><thead><tr><th>RENTAL</th><th>CUSTOMER</th><th>VEHICLE</th><th>RENTAL PERIOD</th><th>TOTAL</th><th>STATUS</th></tr></thead><tbody>{filtered.map((rental) => <tr key={rental.id}><td><div className="rental-id">#{rental.id}</div><span className="rental-subtext">Rental record</span></td><td><strong>{rental.customerName || `Customer #${rental.customerId}`}</strong></td><td><strong>{rental.vehicleName || `Vehicle #${rental.carId}`}</strong><span className="rental-subtext">{rental.registrationNumber || ''}</span></td><td><div className="date-range">{rental.startDate} <span>→</span> {rental.endDate}</div><span className="rental-subtext">{Math.max(1, Math.round((new Date(`${rental.endDate}T00:00:00`) - new Date(`${rental.startDate}T00:00:00`)) / 86400000))} day(s)</span></td><td><strong className="rate-value">{currency(rental.totalPrice)}</strong><span className="rental-subtext">{currency(rental.dailyRate)}/day</span></td><td><div className="rental-status-cell"><span className={`status-badge ${rentalStatusClass(rental.status)}`}><span />{rentalStatusLabel(rental.status)}</span><select className="rental-status-select" aria-label={`Change status for rental ${rental.id}`} value={rentalStatusValue(rental.status)} disabled={statusSaving === rental.id} onChange={(event) => onStatusChange(rental, event.target.value)}>{rentalStatusOptions(rental.status).map((option) => <option key={option} value={option}>{rentalStatusLabel(option)}</option>)}</select></div></td></tr>)}</tbody></table></div>}
     </section>
     <div className="bottom-note"><div className="note-symbol"><ShieldCheck size={16} /></div><div><strong>Rental workflow is connected</strong><span>Creating or closing a rental updates the associated vehicle status through the Spring Boot API.</span></div><span className={`connection-pill ${error ? 'offline' : loading ? 'loading' : 'online'}`}><span />{error ? 'API unavailable' : loading ? 'Connecting' : 'API connected'}</span></div>
   </div>;
@@ -522,9 +613,23 @@ function RentalModal({ form, setForm, customers, cars, saving, onClose, onSubmit
   const end = new Date(`${form.endDate}T00:00:00`);
   const days = Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) ? 0 : Math.max(1, Math.round((end - start) / 86400000));
   const estimatedTotal = days > 0 && selectedCar ? days * Number(selectedCar.rentalPrice || 0) : 0;
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="vehicle-modal" role="dialog" aria-modal="true" aria-labelledby="rental-modal-title"><div className="modal-heading"><div><div className="eyebrow"><span className="eyebrow-dot" /> NEW RENTAL</div><h2 id="rental-modal-title">Create a rental</h2><p>Select a customer, available vehicle, and rental dates.</p></div><button className="icon-button modal-close" onClick={onClose} aria-label="Close dialog"><X size={19} /></button></div><form onSubmit={onSubmit}><div className="form-grid"><label className="form-field form-field-wide"><span>Customer <em>*</em></span><select required value={form.customerId} onChange={update('customerId')}><option value="">Select a customer</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.fullName} — {customer.phone}</option>)}</select></label><label className="form-field form-field-wide"><span>Available vehicle <em>*</em></span><select required value={form.carId} onChange={update('carId')}><option value="">Select a vehicle</option>{cars.map((car) => <option key={car.id} value={car.id}>{car.brand} {car.model} · {car.registrationNumber} · {currency(car.rentalPrice)}/day</option>)}</select></label><label className="form-field"><span>Start date <em>*</em></span><input type="date" required min={localDate()} value={form.startDate} onChange={update('startDate')} /></label><label className="form-field"><span>End date <em>*</em></span><input type="date" required min={form.startDate || localDate()} value={form.endDate} onChange={update('endDate')} /></label><label className="form-field form-field-wide"><span>Notes</span><input maxLength="500" value={form.notes} onChange={update('notes')} placeholder="Optional notes for this rental" /></label></div><div className="rental-estimate"><div><span>Daily rate</span><strong>{selectedCar ? currency(selectedCar.rentalPrice) : '—'}</strong></div><div><span>Estimated duration</span><strong>{days > 0 ? `${days} day(s)` : 'Check dates'}</strong></div><div><span>Estimated total</span><strong>{currency(estimatedTotal)}</strong></div></div><div className="modal-footer"><span className="required-note">Vehicle is reserved when saved.</span><div><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button type="submit" className="button button-primary" disabled={saving || !customers.length || !cars.length || !form.customerId || !form.carId || !form.startDate || !form.endDate || form.endDate < form.startDate}>{saving ? <LoaderCircle size={16} className="spin" /> : <Check size={16} />}{saving ? 'Creating...' : 'Create rental'}</button></div></div></form></section></div>;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="vehicle-modal" role="dialog" aria-modal="true" aria-labelledby="rental-modal-title"><div className="modal-heading"><div><div className="eyebrow"><span className="eyebrow-dot" /> NEW RENTAL</div><h2 id="rental-modal-title">Create a rental</h2><p>Select a customer, available vehicle, and rental dates.</p></div><button className="icon-button modal-close" onClick={onClose} aria-label="Close dialog"><X size={19} /></button></div><form onSubmit={onSubmit}><div className="form-grid"><label className="form-field form-field-wide"><span>Customer <em>*</em></span><select required value={form.customerId} onChange={update('customerId')}><option value="">Select a customer</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.fullName} — {customer.phone}</option>)}</select></label><label className="form-field form-field-wide"><span>Available vehicle <em>*</em></span><select required value={form.carId} onChange={update('carId')}><option value="">Select a vehicle</option>{cars.map((car) => <option key={car.id} value={car.id}>{car.brand} {car.model} · {car.registrationNumber} · {currency(car.rentalPrice)}/day</option>)}</select></label><label className="form-field"><span>Start date <em>*</em></span><input type="date" required min={localDate()} value={form.startDate} onChange={update('startDate')} /></label><label className="form-field"><span>End date <em>*</em></span><input type="date" required min={form.startDate || localDate()} value={form.endDate} onChange={update('endDate')} /></label>{form.startDate && form.endDate && form.startDate < localDate() ? <div className="rental-date-warning form-field-wide"><AlertCircle size={14} /> Start date cannot be in the past.</div> : form.startDate && form.endDate && form.endDate < form.startDate ? <div className="rental-date-warning form-field-wide"><AlertCircle size={14} /> Return date must be on or after the start date.</div> : null}<label className="form-field form-field-wide"><span>Notes</span><input maxLength="500" value={form.notes} onChange={update('notes')} placeholder="Optional notes for this rental" /></label></div><div className="rental-estimate"><div><span>Daily rate</span><strong>{selectedCar ? currency(selectedCar.rentalPrice) : '—'}</strong></div><div><span>Estimated duration</span><strong>{days > 0 ? `${days} day(s)` : 'Check dates'}</strong></div><div><span>Estimated total</span><strong>{currency(estimatedTotal)}</strong></div></div><div className="modal-footer"><span className="required-note">Vehicle is reserved when saved.</span><div><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button type="submit" className="button button-primary" disabled={saving || !customers.length || !cars.length || !form.customerId || !form.carId || !form.startDate || !form.endDate || form.startDate < localDate() || form.endDate < form.startDate}>{saving ? <LoaderCircle size={16} className="spin" /> : <Check size={16} />}{saving ? 'Creating...' : 'Create rental'}</button></div></div></form></section></div>;
 }
 
+function rentalStatusValue(status) {
+  const normalized = String(status || 'RESERVED').toUpperCase();
+  return normalized === 'BOOKED' ? 'RESERVED' : normalized;
+}
+function rentalStatusOptions(status) {
+  const current = rentalStatusValue(status);
+  const transitions = {
+    RESERVED: ['RESERVED', 'ACTIVE', 'CANCELLED'],
+    ACTIVE: ['ACTIVE', 'COMPLETED'],
+    COMPLETED: ['COMPLETED'],
+    CANCELLED: ['CANCELLED'],
+  };
+  return transitions[current] || [current];
+}
 function rentalStatusLabel(status) {
   const normalized = String(status || 'RESERVED').toUpperCase();
   return ({ RESERVED: 'Reserved', BOOKED: 'Reserved', ACTIVE: 'Active', COMPLETED: 'Completed', CANCELLED: 'Cancelled' })[normalized] || statusLabel(normalized);
@@ -535,14 +640,6 @@ function rentalStatusClass(status) {
   if (normalized === 'ACTIVE') return 'rented';
   if (normalized === 'COMPLETED') return 'available';
   return 'neutral';
-}
-
-function ComingSoon({ page, onGoVehicles }) {
-  const content = {
-    Reports: { icon: <TrendingUp size={23} />, title: 'Fleet reporting is on the roadmap', copy: 'Reporting can now be built on the customer, rental, and vehicle records.' },
-    Settings: { icon: <Settings2 size={23} />, title: 'Workspace settings', copy: 'Application settings and role-based access will be added in a later project task.' },
-  }[page];
-  return <div className="coming-page"><div className="coming-card"><div className="coming-icon">{content.icon}</div><span className="coming-eyebrow">ROVE WORKSPACE</span><h1>{content.title}</h1><p>{content.copy}</p><button className="button button-primary" onClick={onGoVehicles}>Go to vehicle inventory <ArrowRight size={16} /></button></div></div>;
 }
 
 createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);

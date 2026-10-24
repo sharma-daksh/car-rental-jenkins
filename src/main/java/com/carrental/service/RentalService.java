@@ -15,25 +15,28 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @Transactional
 public class RentalService {
     private static final Set<String> OPEN_STATUSES = Set.of("RESERVED", "BOOKED", "ACTIVE");
-    private static final Set<String> VALID_STATUSES = Set.of("RESERVED", "ACTIVE", "COMPLETED", "CANCELLED");
+    private static final Set<String> VALID_STATUSES = Set.of("RESERVED", "BOOKED", "ACTIVE", "COMPLETED", "CANCELLED");
+
     private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
             "RESERVED", Set.of("ACTIVE", "CANCELLED"),
+            "BOOKED", Set.of("ACTIVE", "CANCELLED"), // compatibility with older records
             "ACTIVE", Set.of("COMPLETED"),
             "COMPLETED", Set.of(),
-            "CANCELLED", Set.of());
+            "CANCELLED", Set.of()
+    );
+
     private final RentalRepository rentalRepository;
     private final CustomerRepository customerRepository;
     private final CarRepository carRepository;
 
-    public RentalService(RentalRepository rentalRepository, CustomerRepository customerRepository,
-            CarRepository carRepository) {
+    public RentalService(RentalRepository rentalRepository, CustomerRepository customerRepository, CarRepository carRepository) {
         this.rentalRepository = rentalRepository;
         this.customerRepository = customerRepository;
         this.carRepository = carRepository;
@@ -45,42 +48,49 @@ public class RentalService {
     }
 
     public RentalResponse create(RentalRequest request) {
-        if (request.endDate().isBefore(request.startDate())) {
+        if (request == null || request.customerId() == null || request.carId() == null
+                || request.startDate() == null || request.endDate() == null) {
+            throw new IllegalArgumentException("Customer, vehicle, start date, and end date are required.");
+        }
+        LocalDate startDate = request.startDate();
+        LocalDate endDate = request.endDate();
+        if (endDate.isBefore(startDate)) {
             throw new IllegalArgumentException("End date must be on or after the start date.");
         }
-        if (request.startDate().isBefore(LocalDate.now())) {
+        if (startDate.isBefore(LocalDate.now())) {
             throw new IllegalArgumentException("Start date cannot be in the past.");
         }
 
         Customer customer = customerRepository.findById(request.customerId())
                 .orElseThrow(() -> new java.util.NoSuchElementException("Customer not found: " + request.customerId()));
-        Car car = carRepository.findById(request.carId())
+
+        // Acquire a row lock before checking availability. Concurrent requests for
+        // the same vehicle must wait for the first reservation transaction to finish.
+        Car car = carRepository.findByIdForUpdate(request.carId())
                 .orElseThrow(() -> new java.util.NoSuchElementException("Vehicle not found: " + request.carId()));
 
         if (car.getStatus() == null || !"AVAILABLE".equalsIgnoreCase(car.getStatus())) {
-            throw new IllegalStateException(
-                    "This vehicle is not available. Refresh the inventory and choose an available vehicle.");
+            throw new IllegalStateException("This vehicle is not available. Refresh the inventory and choose an available vehicle.");
         }
         if (rentalRepository.existsByCar_IdAndStatusIn(car.getId(), OPEN_STATUSES)) {
-            throw new IllegalStateException(
-                    "This vehicle already has an open rental. Refresh the inventory and choose another vehicle.");
+            throw new IllegalStateException("This vehicle already has an open rental. Refresh the inventory and choose another vehicle.");
         }
         if (car.getRentalPrice() == null || car.getRentalPrice() < 0) {
             throw new IllegalStateException("The selected vehicle does not have a valid daily rental rate.");
         }
 
-        long days = Math.max(1, ChronoUnit.DAYS.between(request.startDate(), request.endDate()));
+        long days = Math.max(1, ChronoUnit.DAYS.between(startDate, endDate));
         Rental rental = new Rental();
         rental.setCustomer(customer);
         rental.setCar(car);
-        rental.setStartDate(request.startDate());
-        rental.setEndDate(request.endDate());
+        rental.setStartDate(startDate);
+        rental.setEndDate(endDate);
         rental.setDailyRate(car.getRentalPrice());
         rental.setTotalPrice(Math.round(days * car.getRentalPrice() * 100.0) / 100.0);
         rental.setStatus("RESERVED");
         rental.setNotes(request.notes() == null || request.notes().isBlank() ? null : request.notes().trim());
 
-        // Reserve inventory in the same transaction as the rental record.
+        // Reserve inventory atomically with the rental record.
         car.setStatus("BOOKED");
         carRepository.save(car);
         return RentalResponse.from(rentalRepository.save(rental));
@@ -91,28 +101,19 @@ public class RentalService {
         if (!VALID_STATUSES.contains(nextStatus)) {
             throw new IllegalArgumentException("Invalid rental status. Use RESERVED, ACTIVE, COMPLETED, or CANCELLED.");
         }
-        Rental rental = rentalRepository.findById(id)
+
+        Rental rental = rentalRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new java.util.NoSuchElementException("Rental not found: " + id));
+        Car car = carRepository.findByIdForUpdate(rental.getCar().getId())
+                .orElseThrow(() -> new java.util.NoSuchElementException("Vehicle not found for this rental."));
 
-        String currentStatus = rental.getStatus() == null
-                ? ""
-                : rental.getStatus().trim().toUpperCase(Locale.ROOT);
+        String currentStatus = rental.getStatus() == null ? "" : rental.getStatus().trim().toUpperCase(Locale.ROOT);
+        if (nextStatus.equals(currentStatus)) return RentalResponse.from(rental);
 
-        if (nextStatus.equals(currentStatus)) {
-            return RentalResponse.from(rental);
+        if (!ALLOWED_TRANSITIONS.getOrDefault(currentStatus, Set.of()).contains(nextStatus)) {
+            throw new IllegalStateException("Invalid rental status transition from " + currentStatus + " to " + nextStatus + ".");
         }
 
-        if (!ALLOWED_TRANSITIONS
-                .getOrDefault(currentStatus, Set.of())
-                .contains(nextStatus)) {
-            throw new IllegalStateException(
-                    "Invalid rental status transition from "
-                            + currentStatus + " to " + nextStatus + ".");
-        }
-
-        Car car = carRepository.findById(rental.getCar().getId())
-                .orElseThrow(() -> new java.util.NoSuchElementException(
-                        "Vehicle not found for this rental."));
         boolean targetOpen = OPEN_STATUSES.contains(nextStatus);
         boolean vehicleInUseByAnotherRental = rentalRepository.existsByCar_IdAndIdNotAndStatusIn(
                 car.getId(), rental.getId(), OPEN_STATUSES);
@@ -121,14 +122,16 @@ public class RentalService {
             if (vehicleInUseByAnotherRental) {
                 throw new IllegalStateException("Another open rental already uses this vehicle.");
             }
-            String carStatus = car.getStatus() == null ? "" : car.getStatus().toUpperCase(Locale.ROOT);
-            boolean thisRentalAlreadyOwnsVehicle = OPEN_STATUSES.contains(rental.getStatus())
+            String carStatus = car.getStatus() == null ? "" : car.getStatus().trim().toUpperCase(Locale.ROOT);
+            boolean thisRentalAlreadyOwnsVehicle = OPEN_STATUSES.contains(currentStatus)
                     && ("BOOKED".equals(carStatus) || "ACTIVE".equals(carStatus));
             if (!"AVAILABLE".equals(carStatus) && !thisRentalAlreadyOwnsVehicle) {
                 throw new IllegalStateException("This vehicle is not available for an open rental.");
             }
             car.setStatus("ACTIVE".equals(nextStatus) ? "ACTIVE" : "BOOKED");
         } else {
+            // Only the last open rental can release the vehicle. A vehicle placed
+            // in maintenance must remain in maintenance after a rental is closed.
             if (!vehicleInUseByAnotherRental && !"MAINTENANCE".equalsIgnoreCase(car.getStatus())) {
                 car.setStatus("AVAILABLE");
             }
