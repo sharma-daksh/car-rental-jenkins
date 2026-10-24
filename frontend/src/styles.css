@@ -145,3 +145,30 @@ h1,h2,h3,p { margin-top:0; }
 @media (max-width:1190px) { .sidebar { width:223px; }.topbar { padding:0 26px; }.page-content { padding:28px 26px; }.stats-grid { gap:11px; }.stat-card { padding:15px; }.content-grid { grid-template-columns:minmax(0,1.45fr) minmax(230px,.85fr); }.stat-bottom { align-items:flex-start; flex-direction:column; } }
 @media (max-width:940px) { .sidebar { position:fixed; inset:0 auto 0 0; width:252px; transform:translateX(-102%); transition:transform .2s ease; box-shadow:15px 0 45px #11162a1a; }.sidebar.sidebar-open { transform:translateX(0); }.mobile-scrim { display:block; position:fixed; z-index:9; inset:0; border:0; background:#11142675; }.sidebar-close { display:grid; margin-left:auto; color:#aeb1c5; width:30px;height:30px; }.mobile-menu { display:grid; color:#686f83; width:34px;height:34px; }.topbar { justify-content:flex-start; }.breadcrumb { flex:1; }.content-grid { grid-template-columns:1fr; }.availability-panel { min-height:0; }.stat-bottom { flex-direction:row; align-items:center; }.availability-total { padding-top:5px; } }
 @media (max-width:670px) { .topbar { height:65px; padding:0 15px; gap:10px; }.topbar-actions { gap:8px; }.global-search { width:35px; padding:0 9px; border-color:transparent; }.global-search input,.global-search kbd { display:none; }.global-search:focus-within { position:absolute; right:98px; top:14px; width:min(250px,calc(100vw - 130px)); background:white; border-color:#a79cf1; z-index:3; }.global-search:focus-within input { display:block; }.topbar-divider { display:none; }.topbar-user > svg { display:none; }.topbar-avatar { width:29px;height:29px; }.page-content { padding:24px 14px 25px; }.heading-with-actions { flex-direction:column; align-items:stretch; gap:17px; }.page-heading h1 { font-size:24px; }.heading-actions { width:100%; }.heading-actions .button { flex:1; }.stats-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }.stat-card { padding:14px 13px 12px; }.stat-value { font-size:26px; }.stat-bottom { flex-direction:column; align-items:flex-start; gap:5px; }.insight-banner { align-items:flex-start; padding:14px; gap:10px; flex-wrap:wrap; }.insight-icon { width:34px;height:34px; }.insight-copy { flex-basis:calc(100% - 48px); }.text-button { margin-left:44px; }.panel-header { padding:16px 15px; }.panel-header h2 { font-size:13px; }.vehicle-table th:first-child,.vehicle-table td:first-child { padding-left:14px; }.inventory-toolbar { align-items:stretch; flex-direction:column; padding:15px; }.inventory-controls { flex-direction:column; align-items:stretch; }.filter-search { width:100%; }.status-select-wrap { width:100%; }.status-select-wrap select { max-width:none; flex:1; }.bottom-note { flex-wrap:wrap; padding:13px; }.bottom-note > div:nth-child(2) { flex-basis:calc(100% - 55px); }.connection-pill { margin-left:43px; }.api-notice { flex-wrap:wrap; }.api-notice .button { margin-left:45px; }.form-grid { grid-template-columns:1fr; }.form-field-wide { grid-column:auto; }.vehicle-modal form { padding:18px; }.modal-heading { padding:20px 18px 16px; }.modal-footer { align-items:flex-start; flex-direction:column; }.modal-footer > div { width:100%; }.modal-footer .button { flex:1; }.coming-card { padding:32px 22px; }.coming-card h1 { font-size:21px; }.toast-message { right:15px; bottom:15px; } }
+
+/* Customer + rental workflow */
+.customer-stats { margin-bottom:20px; }
+.customer-avatar { display:grid; place-items:center; flex:0 0 35px; width:35px; height:35px; border-radius:10px; color:#6251cf; background:#f0edff; font-size:10px; font-weight:800; }
+.feature-table { min-width:850px; }
+.feature-table td { white-space:normal; vertical-align:middle; }
+.feature-table td strong { color:#373d51; font-size:10px; }
+.feature-table .vehicle-cell { min-width:150px; }
+.feature-table .vehicle-cell > div:last-child { display:flex; flex-direction:column; gap:4px; }
+.address-cell { min-width:120px; max-width:210px; line-height:1.5; }
+.rental-table { min-width:960px; }
+.rental-id { color:#5143ba; font-weight:800; font-size:11px; }
+.rental-subtext { display:block; margin-top:5px; color:#999eae; font-size:9px; }
+.date-range { color:#535970; font-size:10px; white-space:nowrap; }
+.date-range span { color:#969cad; padding:0 3px; }
+.rental-status-cell { display:flex; align-items:flex-start; flex-direction:column; gap:7px; }
+.rental-status-select { max-width:125px; border:1px solid #e5e7ef; background:#fff; padding:6px 8px; border-radius:6px; color:#646a7d; font-size:9px; outline:none; }
+.rental-status-select:focus { border-color:#9c90e8; }
+.rental-status-select:disabled { opacity:.6; cursor:wait; }
+.rental-availability { display:inline-flex; align-items:center; gap:7px; color:#39896d; background:#e9f7f0; padding:7px 10px; border-radius:7px; font-size:10px; font-weight:700; white-space:nowrap; }
+.workflow-hint { display:flex; align-items:center; gap:10px; margin:-5px 0 18px; padding:12px 14px; border:1px solid #f1dfb4; background:#fff9e9; border-radius:9px; color:#886629; font-size:10px; line-height:1.6; }
+.workflow-hint svg { flex-shrink:0; }
+.rental-estimate { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:20px; padding:14px; border:1px solid #eeecf8; background:#faf9ff; border-radius:9px; }
+.rental-estimate > div { min-width:0; display:flex; flex-direction:column; gap:7px; }
+.rental-estimate span { color:#8c91a3; font-size:9px; }
+.rental-estimate strong { color:#383d54; font-size:12px; overflow-wrap:anywhere; }
+@media (max-width:670px) { .rental-estimate { grid-template-columns:1fr; gap:12px; }.rental-estimate > div { flex-direction:row; align-items:center; justify-content:space-between; }.rental-estimate strong { text-align:right; }.feature-table td { padding:12px 10px; } }
